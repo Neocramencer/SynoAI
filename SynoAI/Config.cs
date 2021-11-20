@@ -63,10 +63,14 @@ namespace SynoAI
         public static string BoxColor { get; private set; }
 
         /// <summary>
-        /// The hex code of the colour to use for the boxing around image matches.
+        ///The stroke width of the Box drawn around the objects.
         /// </summary>
         public static int StrokeWidth { get; private set; }
-
+        
+        /// <summary>
+        ///The stroke width of the Text drawn.
+        /// </summary>
+        public static int TextStroke { get; private set; }
         /// <summary>
         /// The font to use on the image labels.
         /// </summary>
@@ -141,6 +145,7 @@ namespace SynoAI
             DrawMode = configuration.GetValue<DrawMode>("DrawMode", DrawMode.Matches);
 
             StrokeWidth = configuration.GetValue<int>("StrokeWidth", 2);
+            TextStroke = configuration.GetValue<int>("TextStroke", 2);
 
             BoxColor = configuration.GetValue<string>("BoxColor", SKColors.Red.ToString());
 

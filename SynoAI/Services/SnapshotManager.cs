@@ -116,7 +116,8 @@ namespace SynoAI.Services
                         int y = prediction.MinY + Config.FontSize + Config.TextOffsetY;
 
                         // Draw the text
-                        SKFont font = new SKFont(SKTypeface.FromFamilyName(Config.Font), Config.FontSize);
+                        SKFont font = new SKFont(SKTypeface.FromFamilyName(Config.Font, (SKTypefaceStyle)SKFontStyleWeight.Bold), Config.FontSize);
+
                         canvas.DrawText(label, x, y, font, new SKPaint 
                         {
                             Color = GetColour(Config.FontColor)

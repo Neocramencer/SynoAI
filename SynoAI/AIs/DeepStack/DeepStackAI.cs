@@ -7,15 +7,12 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
-using System.Net.Http.Json;
 using System.Threading.Tasks;
 
 namespace SynoAI.AIs.DeepStack
 {
     public class DeepStackAI : AI
     {
-        private const string URL_VISION_DETECTION = "v1/vision/detection";
-
         public async override Task<IEnumerable<AIPrediction>> Process(ILogger logger, Camera camera, byte[] image)
         {
             using (HttpClient client = new HttpClient())
@@ -23,26 +20,22 @@ namespace SynoAI.AIs.DeepStack
                 Stopwatch stopwatch = Stopwatch.StartNew();
 
                 decimal minConfidence = camera.Threshold / 100m;
-                string requestJson = JsonConvert.SerializeObject(new DeepStackRequest()
-                {
-                    MinConfidence = minConfidence
-                });
 
                 MultipartFormDataContent multipartContent = new MultipartFormDataContent();
                 multipartContent.Add(new StreamContent(new MemoryStream(image)), "image", "image");
-                multipartContent.Add(new StringContent(requestJson, null, "application/json")); 
+                multipartContent.Add(new StringContent(minConfidence.ToString()), "min_confidence"); // From face detection example - using JSON with MinConfidence didn't always work
 
                 client.BaseAddress = new Uri(Config.AIUrl);
 
-                logger.LogDebug($"{camera.Name}: DeepStackAI: Sending image.");
+                logger.LogDebug($"{camera.Name}: DeepStackAI: POSTing image with minimum confidence of {minConfidence} ({camera.Threshold}%) to {string.Join("/", Config.AIUrl, Config.AIPath)}.");
 
-                HttpResponseMessage response = await client.PostAsync(URL_VISION_DETECTION, multipartContent);
+                HttpResponseMessage response = await client.PostAsync(Config.AIPath, multipartContent);
                 if (response.IsSuccessStatusCode)
                 {
-                    DeepStackResponse deepStackResponse = await GetResponse(response);
+                    DeepStackResponse deepStackResponse = await GetResponse(logger, camera, response);
                     if (deepStackResponse.Success)
                     {
-                        IEnumerable<AIPrediction> predictions = deepStackResponse.Predictions.Where(x=> x.Confidence >= minConfidence).Select(x => new AIPrediction()
+                        IEnumerable<AIPrediction> predictions = deepStackResponse.Predictions.Where(x=> x.Confidence >= minConfidence).Select(x => new AIPrediction()  
                         {
                             Confidence = x.Confidence * 100,
                             Label = x.Label,
@@ -75,9 +68,11 @@ namespace SynoAI.AIs.DeepStack
         /// </summary>
         /// <param name="message">The message to parse.</param>
         /// <returns>A usable object.</returns>
-        private async Task<DeepStackResponse> GetResponse(HttpResponseMessage message)
+        private async Task<DeepStackResponse> GetResponse(ILogger logger, Camera camera, HttpResponseMessage message)
         {
-            string content = await message.Content.ReadAsStringAsync();
+            string content = await message.Content.ReadAsStringAsync();                
+            logger.LogDebug($"{camera.Name}: DeepStackAI: Responded with {content}.");
+
             return JsonConvert.DeserializeObject<DeepStackResponse>(content);
         }
     }

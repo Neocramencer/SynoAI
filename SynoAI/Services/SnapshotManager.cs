@@ -6,103 +6,64 @@ using System.Linq;
 using Microsoft.Extensions.Logging;
 using SkiaSharp;
 using SynoAI.Models;
+using SynoAI.Extensions;
 
 namespace SynoAI.Services
 {
-    /// <summary>
-    /// A thread safe object for sharing file access between multiple notifications.
-    /// </summary>
-    public class SnapshotManager : ISnapshotManager
+
+    public class SnapshotManager
     {
+ 
         /// <summary>
-        /// The bytes of the received snapshot.
-        /// </summary>
-        private readonly byte[] _snapshot;
-
-        /// <summary>
-        /// All the predictions for the AI; used when the draw mode is "All".
-        /// </summary>
-        private readonly IEnumerable<AIPrediction> _predictions;
-        /// <summary>
-        /// The valid predictions according to the camera configuration; used when the draw mode is "Match".
-        /// </summary>
-        private readonly IEnumerable<AIPrediction> _validPredictions;
-
-        private ProcessedImage _processedImage;
-        private object _processLock = new object();
-
-        private readonly ILogger _logger;
-
-        public SnapshotManager(byte[] snapshot, IEnumerable<AIPrediction> predictions, IEnumerable<AIPrediction> validPredictions, ILogger logger)
-        {
-            _snapshot = snapshot;
-            _predictions = predictions;
-            _validPredictions = validPredictions;
-            _logger = logger;
-        }
-
-        /// <summary>
-        /// Thread-safely processes the image by drawing image boundaries.
+        /// Dresses the source image by adding the boundary boxes and saves the file locally.
         /// </summary>
         /// <param name="camera">The camera the image came from.</param>
-        public ProcessedImage GetImage(Camera camera)
+        /// <param name="snapshot">The image data.</param>
+        /// <param name="predictions">The list of predictions with the right size (but may or may not be the types configured as interest for this camera).</param>
+         /// <param name="validPredictions">The list of predictions with the right size and matching the type of objects of interest for this camera.</param>
+        public static ProcessedImage DressImage(Camera camera, byte[] snapshot, IEnumerable<AIPrediction> predictions, IEnumerable<AIPrediction> validPredictions, ILogger logger) 
         {
-            if (_processedImage == null)
-            {
-                lock (_processLock)
-                {
-                    if (_processedImage == null)
-                    {
-                        // Save the image
-                        string filePath;
-                        using (SKBitmap image = ProcessImage(camera))
-                        {
-                            filePath = SaveImage(_logger, camera, image);
-                        }
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            
+            // Load the bitmap 
+            SKBitmap image = SKBitmap.Decode(snapshot);
 
-                        // Create the helper object
-                        _processedImage = new ProcessedImage(filePath);
+            // Draw the exclusion zones if enabled
+            if (Config.DrawExclusions && camera.Exclusions != null)
+            {
+                logger.LogInformation($"{camera.Name}: Drawing exclusion zones.");
+                
+                using (SKCanvas canvas = new SKCanvas(image))
+                {
+                    // Draw the zone
+                    foreach (Zone zone in camera.Exclusions)
+                    {
+                        SKRect rectangle = SKRect.Create(zone.Start.X, zone.Start.Y, zone.End.X - zone.Start.X, zone.End.Y - zone.Start.Y);
+                        canvas.DrawRect(rectangle, new SKPaint 
+                        {
+                            Style = SKPaintStyle.Stroke,
+                            Color = GetColour(Config.ExclusionBoxColor),
+                            StrokeWidth = Config.StrokeWidth
+                        });
                     }
                 }
             }
-            return _processedImage;
-        }
-
-        /// <summary>
-        /// Processes the source image by adding the boundary boxes and saves the file locally.
-        /// </summary>
-        /// <param name="camera">The camera the image came from.</param>
-        /// <param name="imageBytes">The image data.</param>
-        /// <param name="predictions">The list of predictions to add to the image.</param>
-        private SKBitmap ProcessImage(Camera camera)
-        {
-            Stopwatch stopwatch = Stopwatch.StartNew();
-
-            _logger.LogInformation($"{camera.Name}: Processing image boundaries.");
-
-            // Load the bitmap 
-            SKBitmap image = SKBitmap.Decode(new MemoryStream(_snapshot));
 
             // Don't process the drawing if the drawing mode is off
             if (Config.DrawMode == DrawMode.Off)
             {
-                _logger.LogInformation($"{camera.Name}: Draw mode is Off. Skipping image boundaries.");
-                return image;
+                logger.LogInformation($"{camera.Name}: Draw mode is Off. Skipping image boundaries.");
             }
-
-            // Draw the predictions
-            using (SKCanvas canvas = new SKCanvas(image))
+            else 
             {
-                foreach (AIPrediction prediction in Config.DrawMode == DrawMode.All ? _predictions : _validPredictions)
+                // Draw the predictions
+                logger.LogInformation($"{camera.Name}: Dressing image with boundaries.");
+                using (SKCanvas canvas = new SKCanvas(image))
                 {
-                    // Write out anything detected that was above the minimum size
-                    int minSizeX = camera.GetMinSizeX();
-                    int minSizeY = camera.GetMinSizeY();
-                    if (prediction.SizeX >= minSizeX && prediction.SizeY >= minSizeY)
-                    {
-                        decimal confidence = Math.Round(prediction.Confidence, 0, MidpointRounding.AwayFromZero);
-                        string label = $"{prediction.Label} ({confidence}%)";
+                    int counter = 1; //used for assigning a reference number on each prediction if AlternativeLabelling is true
 
+                    foreach (AIPrediction prediction in Config.DrawMode == DrawMode.All ? predictions : validPredictions)
+                    {
                         // Draw the box
                         SKRect rectangle = SKRect.Create(prediction.MinX, prediction.MinY, prediction.SizeX, prediction.SizeY);
                         canvas.DrawRect(rectangle, new SKPaint 
@@ -111,37 +72,65 @@ namespace SynoAI.Services
                             Color = GetColour(Config.BoxColor),
                             StrokeWidth = Config.StrokeWidth
                         });
-                        
+                            
+                        // Label creation, either classic label or alternative labelling (and only if there is more than one object)
+                        string label = String.Empty;
+                        if (Config.AlternativeLabelling && Config.DrawMode == DrawMode.Matches) 
+                        {
+                            // On alternatie labelling, just place a reference number and only if there is more than one object
+                            if (validPredictions.Count() > 1) 
+                            {
+                                label = counter.ToString();
+                                counter++;
+                            }
+                        }
+                        else
+                        {
+                            decimal confidence = Math.Round(prediction.Confidence, 0, MidpointRounding.AwayFromZero);
+                            label = $"{prediction.Label.FirstCharToUpper()} {confidence}%";
+                        }
+
+                        // Label positioning
                         int x = prediction.MinX + Config.TextOffsetX;
                         int y = prediction.MinY + Config.FontSize + Config.TextOffsetY;
 
+                        // Consider below box placement
+                        if (Config.LabelBelowBox) 
+                        {
+                            y += prediction.SizeY;
+                        }
+        
                         // Draw the text
                         SKFont font = new SKFont(SKTypeface.FromFamilyName(Config.Font, (SKTypefaceStyle)SKFontStyleWeight.Bold), Config.FontSize);
 
                         canvas.DrawText(label, x, y, font, new SKPaint 
                         {
                             Color = GetColour(Config.FontColor)
-                        });
+                        });   
                     }
                 }
             }
 
             stopwatch.Stop();
-            _logger.LogInformation($"{camera.Name}: Finished processing image boundaries ({stopwatch.ElapsedMilliseconds}ms).");
+            logger.LogInformation($"{camera.Name}: Finished dressing image boundaries ({stopwatch.ElapsedMilliseconds}ms).");
 
-            return image;
+            // Save the image, including the amount of valid predictions as suffix.
+            String filePath = SaveImage(logger,camera, image, validPredictions.Count().ToString());
+            return new ProcessedImage(filePath);
         }
+
 
         /// <summary>
         /// Saves the original unprocessed image from the provided byte array to the camera's capture directory.
         /// </summary>
         /// <param name="camera">The camera to save the image for.</param>
-        /// <param name="image">The image to save.</param>
+        /// <param name="snapshot">The image to save.</param>
         public static string SaveOriginalImage(ILogger logger, Camera camera, byte[] snapshot)
         {
             SKBitmap image = SKBitmap.Decode(new MemoryStream(snapshot));
             return SaveImage(logger, camera, image, "Original");
         }
+
 
         /// <summary>
         /// Saves the image to the camera's capture directory.
@@ -152,7 +141,7 @@ namespace SynoAI.Services
         {
             Stopwatch stopwatch = Stopwatch.StartNew();
 
-            string directory = $"Captures";
+            string directory = Constants.DIRECTORY_CAPTURES;
             directory = Path.Combine(directory, camera.Name);
 
             if (!Directory.Exists(directory))
@@ -161,12 +150,30 @@ namespace SynoAI.Services
                 Directory.CreateDirectory(directory);
             }
 
-            string fileName = $"{camera.Name}_{DateTime.Now:yyyy_MM_dd_HH_mm_ss_FFF}";
-            if (!string.IsNullOrWhiteSpace(suffix))
+            //euquiq, ALTERNATIVE FILE NAMING: Camera name is already used in the containing folder name
+            //Also, a different separator used for suffix, which in turn holds detection data (number of valid objects)
+            //Which is used for graphs.
+            
+            string fileName = String.Empty;
+
+            if (Config.AlternativeLabelling) {
+                fileName = $"{DateTime.Now:yyyy_MM_dd_HH_mm_ss}";
+                if (!string.IsNullOrWhiteSpace(suffix))
+                {
+                    fileName += "-" + suffix;
+                }
+                fileName += ".jpg";
+            } 
+            else 
             {
-                fileName += "_" + suffix;
+                //Standard file naming
+                fileName = $"{camera.Name}_{DateTime.Now:yyyy_MM_dd_HH_mm_ss_FFF}";
+                if (!string.IsNullOrWhiteSpace(suffix))
+                {
+                    fileName += "_" + suffix;
+                }
+                fileName += ".jpeg";
             }
-            fileName+= ".jpeg";
 
             string filePath = Path.Combine(directory, fileName);
             logger.LogInformation($"{camera}: Saving image to '{filePath}'.");
@@ -184,16 +191,16 @@ namespace SynoAI.Services
                 {
                     logger.LogInformation($"{camera}: Failed to save image to '{filePath}' ({stopwatch.ElapsedMilliseconds}ms).");
                 }
-            }
-            
+            }          
             return filePath;
         }
+
 
         /// <summary>
         /// Parses the provided colour name into an SKColor.
         /// </summary>
         /// <param name="colour">The string to parse.</param>
-        private SKColor GetColour(string hex)
+        private static SKColor GetColour(string hex)
         {
             if (!SKColor.TryParse(hex, out SKColor colour))
             {

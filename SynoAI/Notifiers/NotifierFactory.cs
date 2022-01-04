@@ -6,8 +6,6 @@ using SynoAI.Notifiers.Telegram;
 using SynoAI.Notifiers.Webhook;
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 
 namespace SynoAI.Notifiers
 {
@@ -41,6 +39,7 @@ namespace SynoAI.Notifiers
 
             INotifier notifier = factory.Create(logger, section);
             notifier.Cameras = section.GetSection("Cameras").Get<List<string>>();
+            notifier.Types = section.GetSection("Types").Get<List<string>>();
 
             return notifier;
         }

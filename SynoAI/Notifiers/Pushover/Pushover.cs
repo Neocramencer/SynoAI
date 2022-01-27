@@ -46,7 +46,7 @@ namespace SynoAI.Notifiers.Pushover
 
             string message = GetMessage(camera, foundTypes);
             string device = Devices == null || Devices.Count() == 0 ? String.Empty : string.Join(',', Devices);
-            string title = $"{camera.Name}: Movement Detected";
+            string title = $"{camera.Name}: Bewegung erkannt!";
 
             MultipartFormDataContent form = new MultipartFormDataContent();
             form.Add(new StringContent(device), "\"device\"");

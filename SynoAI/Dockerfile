@@ -6,11 +6,10 @@ EXPOSE 443
 
 FROM mcr.microsoft.com/dotnet/sdk:5.0 AS build
 WORKDIR /src
-COPY ["SynoAI.csproj", "./"]
-RUN dotnet restore "SynoAI.csproj"
+COPY ["SynoAI/SynoAI.csproj", "SynoAI/"]
+RUN dotnet restore "SynoAI/SynoAI.csproj"
 COPY . .
-
-WORKDIR "/src/."
+WORKDIR "/src/SynoAI"
 RUN dotnet build "SynoAI.csproj" -c Release -o /app/build
 
 FROM build AS publish

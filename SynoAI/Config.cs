@@ -4,12 +4,8 @@ using SkiaSharp;
 using SynoAI.AIs;
 using SynoAI.Models;
 using SynoAI.Notifiers;
-using SynoAI.Notifiers.Pushbullet;
 using System;
 using System.Collections.Generic;
-using System.Dynamic;
-using System.Linq;
-using System.Threading.Tasks;
 
 namespace SynoAI
 {
@@ -51,17 +47,24 @@ namespace SynoAI
         /// 2 = Low bandwidth
         /// </summary>
         public static CameraQuality Quality { get; private set; }
-
-        /// <summary>
-        /// The amount of time that needs to have passed between the last call to check the camera and the current call.
-        /// </summary>
-        public static int Delay { get; private set; }
-
         /// <summary>
         /// The hex code of the colour to use for the boxing around image matches.
         /// </summary>
         public static string BoxColor { get; private set; }
+        /// <summary>
+        /// The hex code of the colour to use for the exclusion boxes.
+        /// </summary>
+        public static string ExclusionBoxColor { get; private set; }
 
+        /// <summary>
+        ///The stroke width of the Box drawn around the objects.
+        /// </summary>
+        public static int StrokeWidth { get; private set; }
+        
+        /// <summary>
+        ///The stroke width of the Text drawn.
+        /// </summary>
+        public static int TextStroke { get; private set; }
         /// <summary>
         /// The font to use on the image labels.
         /// </summary>
@@ -83,17 +86,57 @@ namespace SynoAI
         /// </summary>
         public static int TextOffsetY { get; private set; }
         /// <summary>
+        /// True will only place a reference number on each label image, later detailing object type and confidence percentage on the notification text
+        /// </summary>
+        public static bool AlternativeLabelling { get; private set; } 
+        /// <summary>
+        /// True will place each image label below the boundary box.
+        /// </summary>
+        public static bool LabelBelowBox { get; private set; } 
+        /// <summary>
+        /// Upon movement, the maximum number of snapshots sequentially retrieved from SSS until finding an object of interest (i.e. 4 snapshots)
+        /// </summary>
+        public static int MaxSnapshots { get; private set; } 
+        /// <summary>
         /// Whether this original snapshot generated from the API should be saved to the file system.
         /// </summary>
-        public static bool SaveOriginalSnapshot { get; private set; }
+        public static SaveSnapshotMode SaveOriginalSnapshot { get; private set; }
+
+        /// <summary>
+        /// The amount of days to keep captured images before automatically deleting them.
+        /// </summary>
+        public static int DaysToKeepCaptures { get; private set; }
 
         /// <summary>
         /// The artificial intelligence system to process the images with.
         /// </summary>
         public static AIType AI { get; private set; }
+        /// <summary>
+        /// The URL to access the AI.
+        /// </summary>
         public static string AIUrl { get; private set; }
+        /// <summary>
+        /// Development use only. The internal path to call the AI. Potentially a better way to do this would be to support multiple AIs and have separate configs baked into each AI.
+        /// </summary>
+        public static string AIPath { get; private set; }
+        
+        /// <summary>
+        /// The default minimum width that an object must be to be considered valid for reporting. Can be overridden on a camera by camera basis to account for different camera resolutions.
+        /// </summary>
         public static int MinSizeX { get; private set; }
+        /// <summary>
+        /// The default minimum height that an object must be to be considered valid for reporting. Can be overridden on a camera by camera basis to account for different camera resolutions.
+        /// </summary>
         public static int MinSizeY { get; private set; }
+
+        /// <summary>
+        /// The default maximum width that an object must be to be considered valid for reporting. Can be overridden on a camera by camera basis to account for different camera resolutions.
+        /// </summary>
+        public static int MaxSizeX { get; private set; }
+        /// <summary>
+        /// The default maximum height that an object must be to be considered valid for reporting. Can be overridden on a camera by camera basis to account for different camera resolutions.
+        /// </summary>
+        public static int MaxSizeY { get; private set; }
 
         /// <summary>
         /// The list of cameras.
@@ -107,6 +150,10 @@ namespace SynoAI
         ///  - Or draw nothing.
         /// </summary>
         public static DrawMode DrawMode {get; private set; }
+        /// <summary>
+        /// Whether the draw the exclusion zone boxes on images. Useful for testing box locations.
+        /// </summary>
+        public static bool DrawExclusions {get; private set; }
 
         /// <summary>
         /// The list of possible notifiers.
@@ -131,14 +178,18 @@ namespace SynoAI
             ApiVersionCamera = configuration.GetValue<int>("ApiVersionCamera", 9);  // Surveillance Station 8.0
 
             Quality = configuration.GetValue<CameraQuality>("Quality", CameraQuality.Balanced);
-
-            Delay = configuration.GetValue<int>("Delay", 5000);
+            
             DrawMode = configuration.GetValue<DrawMode>("DrawMode", DrawMode.Matches);
+            DrawExclusions = configuration.GetValue<bool>("DrawExclusions", false);
 
-            BoxColor = configuration.GetValue<string>("BoxColor", SKColors.Red.ToString());
+            StrokeWidth = configuration.GetValue<int>("StrokeWidth", 2);
+            TextStroke = configuration.GetValue<int>("TextStroke", 2);
+
+            BoxColor = configuration.GetValue<string>("BoxColor", SKColors.Green.ToString());
+            ExclusionBoxColor = configuration.GetValue<string>("ExclusionBoxColor", SKColors.Green.ToString());
 
             Font = configuration.GetValue<string>("Font", "Tahoma");
-            FontColor = configuration.GetValue<string>("FontColor", SKColors.Red.ToString());
+            FontColor = configuration.GetValue<string>("FontColor", SKColors.Green.ToString());
             FontSize = configuration.GetValue<int>("FontSize", 12);
             
             TextOffsetX = configuration.GetValue<int>("TextOffsetX", 4);
@@ -147,11 +198,23 @@ namespace SynoAI
             MinSizeX = configuration.GetValue<int>("MinSizeX", 50);
             MinSizeY = configuration.GetValue<int>("MinSizeY", 50);
 
-            SaveOriginalSnapshot = configuration.GetValue<bool>("SaveOriginalSnapshot", false);
+            // euquiq: A bit overkill to use int.MaxValue :)
+            // TODO: Just make this use 0 or null and handle appropriately
+            MaxSizeX = configuration.GetValue<int>("MaxSizeX", int.MaxValue);
+            MaxSizeY = configuration.GetValue<int>("MaxSizeY", int.MaxValue);
+
+            LabelBelowBox = configuration.GetValue<bool>("LabelBelowBox", false);
+            AlternativeLabelling = configuration.GetValue<bool>("AlternativeLabelling", false);
+            MaxSnapshots = configuration.GetValue<int>("MaxSnapshots", 1);
+
+            SaveOriginalSnapshot = configuration.GetValue<SaveSnapshotMode>("SaveOriginalSnapshot", SaveSnapshotMode.Off);
+
+            DaysToKeepCaptures = configuration.GetValue<int>("DaysToKeepCaptures", 0);
 
             IConfigurationSection aiSection = configuration.GetSection("AI");
             AI = aiSection.GetValue<AIType>("Type", AIType.DeepStack);
             AIUrl = aiSection.GetValue<string>("Url");
+            AIPath = aiSection.GetValue<string>("Path","v1/vision/detection");
 
             Cameras = GenerateCameras(logger, configuration);
             Notifiers = GenerateNotifiers(logger, configuration);

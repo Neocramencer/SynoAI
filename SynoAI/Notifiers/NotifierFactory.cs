@@ -2,12 +2,11 @@
 using Microsoft.Extensions.Logging;
 using SynoAI.Notifiers.Email;
 using SynoAI.Notifiers.Pushbullet;
+using SynoAI.Notifiers.Pushover;
 using SynoAI.Notifiers.Telegram;
 using SynoAI.Notifiers.Webhook;
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 
 namespace SynoAI.Notifiers
 {
@@ -23,17 +22,20 @@ namespace SynoAI.Notifiers
             NotifierFactory factory;
             switch (type)
             {
-                case NotifierType.Pushbullet:
-                    factory = new PushbulletFactory();
-                    break;
-                case NotifierType.Webhook:
-                    factory = new WebhookFactory();
-                    break;
                 case NotifierType.Email:
                     factory = new EmailFactory();
                     break;
+                case NotifierType.Pushbullet:
+                    factory = new PushbulletFactory();
+                    break;
+                case NotifierType.Pushover:
+                    factory = new PushoverFactory();
+                    break;
                 case NotifierType.Telegram:
                     factory = new TelegramFactory();
+                    break;
+                case NotifierType.Webhook:
+                    factory = new WebhookFactory();
                     break;
                 default:
                     throw new NotImplementedException(type.ToString());
@@ -41,6 +43,7 @@ namespace SynoAI.Notifiers
 
             INotifier notifier = factory.Create(logger, section);
             notifier.Cameras = section.GetSection("Cameras").Get<List<string>>();
+            notifier.Types = section.GetSection("Types").Get<List<string>>();
 
             return notifier;
         }

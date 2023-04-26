@@ -7,9 +7,18 @@ While sssAI is a great solution, it is hamstrung by the Synology notification sy
 
 SynoAI aims to solve this problem by side-stepping the Synology notifications entirely by allowing other notification systems to be used.
 
+![Building](https://github.com/djdd87/SynoAI/actions/workflows/dotnet.yml/badge.svg)
+![LatestImage](https://github.com/djdd87/SynoAI/actions/workflows/docker-image.yml/badge.svg)
+
 ## Buy Me A Coffee! :coffee:
 
 I made this application mostly for myself in order to improve upon Christopher Adams' original idea and don't expect anything in return. However, if you find it useful and would like to buy me a coffee, feel free to do it at [__Buy me a coffee! :coffee:__](https://buymeacoff.ee/djdd87). This is entirely optional, but would be appreciated! Or even better, help supported this project by contributing changes such as expanding the supported notification systems (or even AIs).
+
+## Versioning
+
+The documentation you see here corresponds to the branch/tag selected above. The documentation will be accurate for the version tag you have selected, however if viewing the main branch, this is assumed to be the documentation that corresponds to the latest commit and latest image.
+
+For example, if you are using the docker image/version v1.1.0, then ensure you have selected the tag for v1.1.0, otherwise you may see features or options which are not available on your version of SynoAI.
 
 ## Table of Contents
 
@@ -20,6 +29,7 @@ I made this application mostly for myself in order to improve upon Christopher A
   * [Development](#development-config)
 * [Support AIs](#supported-ais)
   * [Deepstack](#deepstack)
+  * [CodeProject.AI-Server](#codeprojectai-server)
 * [Notifications](#notifications)
   * [Pushbullet](#pushbullet)
   * [Webhook](#webhook)
@@ -27,6 +37,8 @@ I made this application mostly for myself in order to improve upon Christopher A
   * [Email](#email) 
   * [HomeAssistant](#homeassistant)
   * [Pushover](#pushover)
+  * [Discord](#discord)
+  * [MQTT](#mqtt)
 * [Caveats](#caveats)
 * [Configuration](#configuration)
   * [1) Configure Deepstack](#1-configure-deepstack)
@@ -41,6 +53,7 @@ I made this application mostly for myself in order to improve upon Christopher A
 * [Problems/Debugging](#problemsdebugging)
   * [Logging](#logging)
   * [Trouble Shooting](#trouble-shooting)
+* [FAQ](#faq)
 
 ## Features
 * Triggered via an Action Rule from Synology Surveillance Station
@@ -60,32 +73,41 @@ An example appsettings.json configuration file can be found [here](#example-apps
 * User [required]: The user that will be used to request API snapshots
 * Password [required]: The password of the user above
 * AllowInsecureUrl [optional] (Default ```false```): Whether to allow an insecure HTTPS connection to the Synology API
+* SynoAIUrl [optional]: The URL that SynoAI is reachable at. E.g. Used to provide URLs to captures in some notifications.
 * Cameras [required]: An array of camera objects - see [Camera Config](#camera-config)
 * Notifiers [required]: See [notifications](#notifications)
 * Quality [optional] (Default: ```Balanced```): The quality, aka "profile type" to use when taking a snapshot. This will be based upon the settings of the streams you have configured in Surveillance Station. i.e. if your low, balanced and high streams have the same settings in Surveillance Station, then this setting will make no difference. But if you have a high quality 4k stream, a balance 1080p stream and a low 720p stream, then setting to high will return and process a 4k image. Note that the higher quality the snapshot, the longer the notification will take. Additionally, the larger the image, the smaller your detected objects may be, so ensure you set the MinSizeX/MinSizeY values respectively.
-  * High: Takes the snapshot using the profile type "High quality"
-  * Balanced: Takes the snapshot using the profile type "Balanced"
-  * Low: Takes the snapshot using the profile type "Low bandwidth" 
+  * `High`: Takes the snapshot using the profile type "High quality"
+  * `Balanced`: Takes the snapshot using the profile type "Balanced"
+  * `Low`: Takes the snapshot using the profile type "Low bandwidth" 
 * MinSizeX [optional] (Default: ```50```): The minimum size in pixels that the object must be to trigger a change (will be ignored if specified on the Camera)
 * MinSizeY [optional] (Default: ```50```): The minimum size in pixels that the object must be to trigger a change (will be ignored if specified on the Camera).
-* Delay [optional] (Default: ```5000```): The period of time in milliseconds (ms) that must occur between the last motion detection of camera and the next time it'll be processed. i.e. if your delay is set to 5000 and your camera reports motion 4 seconds after it had already reported motion to SynoAI, then the check will be ignored. However, if the report from Surveillance Station is more than 5000ms, then the cameras image will be processed.
+* Delay [optional] (Default: ```5000```): The period of time in milliseconds (ms) that must occur between the end of the last motion detection of camera and the next time it'll be processed. 
+  * i.e. if your delay is set to 5000 and your camera reports motion 4 seconds after SynoAI finished processing the previous request, then the check will be ignored. 
+  * However, if the report from Surveillance Station is more than 5000ms, then the cameras image will be processed.
+* DelayAfterSuccess [optional] (Default: ```NULL```): The period of time in milliseconds (ms) that must occur between the end of the last motion detection of camera, which resulted in a successful detection and notification being sent, and the next time it'll be processed. 
+  * i.e. if your delay is set to 5000 and your camera reports motion 4 seconds after SynoAI finished processing the previous request, then the check will be ignored. 
+  * However, if the report from Surveillance Station is more than 5000ms, then the cameras image will be processed. If this value isn't specified, then ```Delay``` will be used.
+* MaxSnapshots [optional] (Default: ```1```): Upon movement, the maximum number of snapshots sequentially retrieved from SSS until finding an object of interest. e.g. if 4 is specified, then SynoAI will make a maximum of 4 requests until it finds a type of interest. If a matching type is found on the 1st snapshot, then no further snapshots will be taken. If nothing is found within the 4 requests, then no further snapshots will be taken until the next time Surveillance Station detects motion
 * DrawMode [optional] (Default: ```Matches```): Whether to draw all predictions from the AI on the capture image:
-  * Matches: Will draw boundary boxes over any object/person that matches the types defined on the cameras
-  * All: Will draw boundary boxes over any object/person that the AI detected
-  * Off: Will not draw boundary boxes (note - this will speed up time between detection and notification as SynoAI will not have to manipulate the image)
+  * `Matches`: Will draw boundary boxes over any object/person that matches the types defined on the cameras
+  * `All`: Will draw boundary boxes over any object/person that the AI detected
+  * `Off`: Will not draw boundary boxes (note - this will speed up time between detection and notification as SynoAI will not have to manipulate the image)
 * DrawExclusions [optional] (Default: ```false```): Whether to draw the exclusion zone boundary boxes on the image. Useful for setting up the initial exclusion zones
 * BoxColor [optional] (Default: ```#FF0000```): The colour of the border of the boundary box
+* TextBoxColor [opional] (Default: ```#00FFFFFF``` aka ```transparent```): The colour of the box to draw behind the text to aid in making text more visible
 * ExclusionBoxColour [optional] (Default: ```#00FF00```): The colour of the border of the exclusion boundary box
+* StrokeWidth [optional] (Default: ```2```): The width, in pixels, of the border around the boundary box
 * Font [optional] (Default: ```Tahoma```): The font to use when labelling the boundary boxes on the output image
 * FontSize [optional] (Default: ```12```): The size of the font to use (in pixels) when labelling the boundary boxes on the output image
-* FontColor [optional] (Default: ```#FF0000```): The colour of the text for the labels when labelling the boundary boxes on the output image
+* FontColor [optional] (Default: ```#00FF00``` aka ```green```): The colour of the text for the labels when labelling the boundary boxes on the output image
 * TextOffsetX [optional] (Default: ```2```) : The number of pixels to offset the label from the left of the inside of the boundary image on the output image
 * TextOffsetY [optional] (Default: ```2```) : The number of pixels to offset the label from the top of the inside of the boundary image on the output image
 * SaveOriginalSnapshot [optional] (Default: ```Off```): A mode determining whether to save the source snapshot that was captured from the API before it was sent to and processed by the AI:
-  * Off: Will never save the original snapshot
-  * Always: Will save every single snapshot every time motion is detected
-  * WithPredictions: Will save the snapshot if the AI makes one or more predictions (note that this will include predictions which aren't valid)
-  * WithValidPredictions: Will save the snapshot only if the AI makes one or more predictions which are deemed as valid, e.g. within size limits, boundaries and expected types
+  * `Off`: Will never save the original snapshot
+  * `Always`: Will save every single snapshot every time motion is detected
+  * `WithPredictions`: Will save the snapshot if the AI makes one or more predictions (note that this will include predictions which aren't valid)
+  * `WithValidPredictions`: Will save the snapshot only if the AI makes one or more predictions which are deemed as valid, e.g. within size limits, boundaries and expected types
 * DaysToKeepCaptures [optional] (Default: ```0```): The number of days to keep images for. Every time motion is detected, the captures directory will be processed and any images older than the specified number of days will be deleted. A value of ```0``` means that captures will be kept forever.
 
 ### Camera Config
@@ -93,17 +115,46 @@ An example appsettings.json configuration file can be found [here](#example-apps
 * Name: [required]: The name of the camera on Surveillance Station
 * Types: [required]: An array of types that will trigger a notification when detected by the AI, e.g. ["Person", "Car"]
 * Threshold [required]: An integer denoting the required confidence of the AI to trigger the notification, e.g. 40 means that the AI must be 40% sure that the object detected was a person before SynoAI sends a notification
-* MinSizeX [optional] (Default: ```NULL```): The minimum pixels that the object must be horizontally to trigger a change (will override the default set on the top level MinSizeX)
-* MinSizeY [optional] (Default: ```NULL```): The minimum pixels that the object must be vertically to trigger a change (will override the default set on the top level MinSizeY)
+* MinSizeX [optional] (Default: ```NULL```): Will override the default set on the top level ```MinSizeX```
+* MinSizeY [optional] (Default: ```NULL```): Will override the default set on the top level ```MinSizeY```
 * Wait [optional]: An integer for the number of milliseconds to wait before requesting a snapshot once triggered, e.g. 2500 will wait for 2500ms (2.5 seconds) before requesting a snapshot from Surveillance Station
+* Delay [optional] (Default: ```NULL```): Will override the value set on the top level ```Delay```
+* DelayAfterSuccess [optional] (Default: ```0```): Will override the value set on the top level ```DelayAfterSuccess```
+* MaxSnapshots [optional] (Default: ```NULL```): Upon movement, the maximum number of snapshots sequentially retrieved from SSS until finding an object of interest (i.e. 4 snapshots). If not specified, will use the value from the main config.
 * Rotate [optional] (Default: ```0```): The degrees to rotate the image after it's captured from SurveillanceStation. The rotation will be applied before it's passed to the AI
 * Exclusions [optional]: An array of exclusion zones to ignore found objects within. If the entirity of an object is within the exclusion zone, then it won't be reported by the notifiers.
-  * Start
+  * Start [required]
     * X: The start X co-ordinate of the exclusion zone
     * Y: The start Y co-ordinate of the exclusion zone
-  * End
+  * End [required]
     * X: The end X co-ordinate of the exclusion zone
     * Y: The end Y co-ordinate of the exclusion zone
+  * Mode [optional] (Default: ```Contains```)
+    * `Contains`: The entire detected object must be contained within the exclusion zone for it to be ignored, i.e. if 1 or more pixel is outside of the boundary, then it will *not* be ignored
+    * `Intersect`: Any part of the detected object must overlap with the exclusion zone for it to be ignored, i.e. if 1 or more pixel is within the boundary, then it *will* be ignored
+    
+#### Camera API
+
+The following settings can be applied to the camera while SynoAI is running. All the following settings can be applied by performing a JSON POST to the respective Camera endpoint. Only the values that you wish to set need to be provided in the JSON body.
+
+* Enabled [optional]: Whether the camera should be enabled or disabled.
+
+
+As an example, to disable the camera with the name `Driveway` on the SynoAI URL `10.0.0.10` port `8080`, you `POST` to http://10.0.0.10:8080/Camera/Driveway with the following JSON body:
+
+```json
+{
+  "Enabled": false
+}
+```
+
+To re-enable the camera, just POST again with `Enabled` set to `true`.
+
+```json
+{
+  "Enabled": true
+}
+```
 
 ### Development Config
 
@@ -113,6 +164,7 @@ Configs which should be changed for debugging (change at own risk):
 
 ## Supported AIs
 * [Deepstack](https://deepstack.cc/)
+* [CodeProject.AI-Server](https://github.com/codeproject/CodeProject.AI-Server/)
 
 In order to specify the AI to use, set the Type property against the AI section in the config:
 
@@ -129,6 +181,18 @@ The Deepstack API is a free to use AI that can identify objects, faces and more.
 ```json
 "AI": {
   "Type": "DeepStack",
+  "Url": "http://10.0.0.10:83"
+}
+```
+* Url [required]: The URL of the AI to POST the image to
+
+### CodeProject.AI-Server
+
+For a full list of supported types see the [CodeProject.AI documentation](https://www.codeproject.com/AI/docs/api/api_reference.html).
+
+```json
+"AI": {
+  "Type": "CodeProjectAIServer",
   "Url": "http://10.0.0.10:83"
 }
 ```
@@ -163,15 +227,18 @@ The [Pushbullet](https://www.pushbullet.com/) notification will send an image an
 * ApiKey [required]: The API key for the Pushbullet service
 
 ### Webhook 
-The webhook notification will POST an image to the specified URL with a specified field name.
+The webhook notification can be used to make web requests (e.g. API calls) either with or without the image that triggered the alert.
 
+#### Configuration
 ```json
 {
+  "Type": "Webhook",
   "Url": "http://servername/resource",
   "Method": "POST",
-  "Field": "image",
-  "SendImage": true,
-  "SendTypes": false
+  "Authentication": "Bearer",
+  "Token": "XYZ.123456",
+  "SendImage": false,
+  "AllowInsecureUrl": false
 }
 ```
 * Url [required]: The URL to send the image to
@@ -187,10 +254,35 @@ The webhook notification will POST an image to the specified URL with a specifie
     * Password [optional]: The password to use when using Basic Authorization
   * Bearer
     * Token [optional]: The token to use when using Basic Authorization
-* Field [optional] (Default: ```image```): The field name of the image in the POST data
+* ImageField [optional] (Default: ```image```): The field name of the image in the POST data
 * SendImage [optional] (Default: ```true```): The image will be sent to the webhook when the method is POST, PATCH or PUT
-* SendTypes [optional] (Default: ```false```): The list of found types will be sent to the webhook in the body of the request as a JSON string array.
+* AllowInsecureUrl [optional] (Default: ```false```): Whether to allow an insecure HTTPS connection to the Webhook.
 
+#### Example POST data
+The following is example data for when ```SendImage``` is ```false``` and ```SynoAIUrl``` is ```"http://192.168.1.2"```.
+
+```json
+{
+  "camera": "Driveway",
+  "foundTypes": [
+    "Car"
+  ],
+  "predictions": [
+    {
+      "Label": "car",
+      "Confidence": 67.89117,
+      "MinX": 1738,
+      "MinY": 420,
+      "MaxX": 2304,
+      "MaxY": 844,
+      "SizeX": 566,
+      "SizeY": 424
+    }
+  ],
+  "message": "Motion detected on Driveway\n\nDetected 1 objects:\nCar",
+  "imageUrl": "http://192.168.1.2/CameraName/capture.jpeg"
+}
+```
 ### Telegram
 The telegram bot will send notifications and images when motion has been detected. To use this notification, you will need to set up your own Telegram bot using [one](https://core.telegram.org/bots#6-botfather) of the many [guides](https://docs.microsoft.com/en-us/azure/bot-service/bot-service-channel-connect-telegram?view=azure-bot-service-4.0) available.
 
@@ -297,6 +389,65 @@ The [Pushover](https://www.pushover.net/) notification will send an image and a 
 * Sound [optional]: The [sound](https://pushover.net/api#sounds) to override the user's default sound choice
 * Priority [optional]: The [priority](https://pushover.net/api#priority) with which to send the message
 
+### Discord
+Send notifications to a Discord server via Discord Webhooks. You can get a Discord Webhook URL for your Discord server by following the instructions [here](https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks).
+
+```json
+{
+  "Type": "Discord",
+  "Url": " https://discord.com/api/webhooks/F4K3W3BH00K"
+}
+```
+* Url [required]: The URL of the Discord Webhook you want to send messages to. 
+
+### MQTT 
+Send notifications as MQTT messages. Messages are JSON-encoded and sent to the `{BaseTopic}\{CameraName}\notification` topic. You can optionally include the capture as a base64 encoded JPG, but this is disabled by default.
+
+#### Configuration
+```json
+{
+  "Type": "MQTT",
+  "Host": "mqtt.domain.com",
+  "Port": 1883,
+  "Username": "user",
+  "Password": "password",
+  "BaseTopic": "synoai",
+  "SendImage": "false"
+}
+```
+* Host [required]: The hostname or IP for the MQTT broker
+* Port [optional] (Default: `1883`): The port the MQTT broker is listening to
+* Username [optional]: The username to use
+* Password [optional]: The password to use
+* BaseTopic [optional] (Default: `"synoai"`): The base topic for messages
+* SendImage [optional] (Default: ```false```): Whether to send a base64-encoded JPG in the `image` field.
+
+#### Example payload data
+The following is example data for when ```SendImage``` is ```false``` and ```SynoAIUrl``` is ```"https://synoai.example.com"```.
+
+```json
+{
+  "camera": "Driveway",
+  "foundTypes": [
+    "Car"
+  ],
+  "predictions": [
+    {
+      "Label": "car",
+      "Confidence": 67.89117,
+      "MinX": 1738,
+      "MinY": 420,
+      "MaxX": 2304,
+      "MaxY": 844,
+      "SizeX": 566,
+      "SizeY": 424
+    }
+  ],
+  "message": "Motion detected on Driveway\n\nDetected 1 objects:\nCar",
+  "imageUrl": "https://synoai.example.com/CameraName/capture.jpeg"
+}
+```
+
 ## Caveats
 * SynoAI still relies on Surveillance Station triggering the motion alerts
 * Looking for an object, such as a car on a driveway, will continually trigger alerts if that object is in view of the camera when Surveillance Station detects movement, e.g. a tree blowing in the wind.
@@ -399,8 +550,8 @@ SynoAI can be installed as a docker image, which is [available from DockerHub](h
 ### Images
 The following is a list of the available images and their meaning:
  
-* Latest: The latest version
-* Stable: A known stable version, which will only periodically receive updates (ensure the readme on the stable branch is followed as the latest branch's readme may contain changes that are not relevant to the stable image).
+* Latest: The latest version. This is the live development version - YMMV
+* v*.*.*: A known stable [release](https://github.com/djdd87/SynoAI/releases).
 
 ### Docker Configuration
 The image can be pulled using the Docker cli by calling:
@@ -521,6 +672,12 @@ This will output the full information log and help identify where things are goi
 
 ### Trouble Shooting
 
+#### Not receiving notifications when one should have been detected
+SynoAI is fast, but reliant on SSS to both notify it and return the current image. If you believe that a notification should have been triggered, then it's likely a configuration or performance issue with your configuration.
+
+* Ensure that there is no delay set in your SSS camera configuration to ignore short-lived motion. For example, if you tell SSS to ignore 2 seconds of motion, that's a 2 second delay between the camera seeing the motion and then running the action rule to tell SynoAI to process the image
+* Investigate your logs for [performance issues](#snapshots-are-slow-to-fetch-from-sss).
+
 #### Image files are saved with a date/time different to the current local
 Ensure your TZ environmental variable is set in your docker configuration.
 
@@ -532,6 +689,19 @@ At play back time, the video algorithm reconstructs the scene over time by first
 When SynoAI requests a snapshot from your NAS, Synology API just fetches the latest I-Frame. While this action is fast and simple, depending on your camera brand and configuration, the most recent I-Frame may be several seconds old and may not even include the actual moving object!
 
 Some cameras are quite savvy on their bandwidth by really stretching the time between each I-Frame sent. I.e. DAHUA cameras brand got a configuration setting, labeled "SMART CODEC" which does just that when "ON". If this is your case, you should turn this "OFF", otherwise SynoAI may be fed old snapshots!
+
+#### Snapshots are slow to fetch from SSS
+Generally snapshots should be returned within a second or, at most, two. If taking a snapshot is taking too long, please try the following before reporting an issue.
+
+* Try using the IP to your DSM instance instead of a hostname as DNS lookups can caused a performance bottleneck depending on your system
+* Try updating the base image with `apt-get update` from a new bash terminal
+* Try all three quality profiles to determine if it's an issue with the performance of your hardware.
+
+Example slow log excerpt:
+
+>info: SynoAI.Controllers.CameraController[0]
+>      Front Courtyard: Snapshot received in 4167ms.
+
 
 #### Camera names with spaces in cause the error "The camera with the name 'My Camera' was not found."
 
@@ -581,3 +751,29 @@ The issue is a networking/firewall issue and is not a fault with SynoAI. This ha
 
 * DeepStackAI: Failed to call API with HTTP status code 'Forbidden'
   * Ensure that you have enabled VISION-DETECTION and correctly spelled it
+
+## FAQ
+
+### How do you set up a notification for each camera?
+
+You need to specify a list of cameras against each notification. If a notification has cameras specified, then it will only send it to those cameras. If the Cameras list is empty or not specified, then the notification will be used for all cameras:
+
+``` json
+"Notifiers": [
+  {
+    "Type": "Webhook",
+    "URL": "https://server/url_1"
+    "Cameras": [ "Camera1" ]
+  },
+  {
+    "Type": "Webhook",
+    "URL": "https://server/url_2"
+    "Cameras": [ "Camera2" ]
+  },
+  {
+    "Type": "Webhook",
+    "URL": "https://server/url_3and4"
+    "Cameras": [ "Camera3", "Camera4" ]
+  }
+]
+```

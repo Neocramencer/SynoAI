@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Dynamic;
+using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Threading.Tasks;
@@ -15,7 +17,12 @@ namespace SynoAI.Notifiers
         public IEnumerable<string> Cameras { get; set; } 
         public IEnumerable<string> Types { get; set; } 
         
-        public abstract Task SendAsync(Camera camera, ProcessedImage processedImage, IEnumerable<string> foundTypes, ILogger logger);
+
+        public virtual Task InitializeAsync(ILogger logger) { return Task.CompletedTask; }
+
+        public abstract Task SendAsync(Camera camera, Notification notification, ILogger logger);
+
+        public virtual Task CleanupAsync(ILogger logger) { return Task.CompletedTask; }
 
         protected string GetMessage(Camera camera, IEnumerable<string> foundTypes, string errorMessage = null)
         {
@@ -52,6 +59,56 @@ namespace SynoAI.Notifiers
             }
 
             return result;
+        }
+
+        protected string GetImageUrl(Camera camera, Notification notification)
+        {
+            if (Config.SynoAIUrL == null)
+            {
+                return null;
+            }
+
+            UriBuilder builder = new UriBuilder(Config.SynoAIUrL);
+            builder.Path += $"{camera.Name}/{notification.ProcessedImage.FileName}";
+
+            return builder.Uri.ToString();
+        }
+
+        /// <summary>
+        /// Generates a JSON representation of the notification.
+        /// </summary>
+        protected string GenerateJSON(Camera camera, Notification notification, bool sendImage)
+        {
+            dynamic jsonObject = new ExpandoObject();
+
+            jsonObject.camera = camera.Name;
+            jsonObject.foundTypes = notification.FoundTypes;
+            jsonObject.predictions = notification.ValidPredictions;
+            jsonObject.message = GetMessage(camera, notification.FoundTypes);
+
+            if (sendImage)
+            {
+                jsonObject.image = ToBase64String(notification.ProcessedImage.GetReadonlyStream());
+            }
+
+            string imageUrl = GetImageUrl(camera, notification);
+            if (imageUrl != null)
+            {
+                jsonObject.imageUrl = imageUrl;
+            }
+
+            return JsonConvert.SerializeObject(jsonObject);
+        }
+
+        /// <summary>
+        /// Returns FileStream data as a base64-encoded string
+        /// </summary>
+        private string ToBase64String(FileStream fileStream)
+        {
+            byte[] buffer = new byte[fileStream.Length];
+            fileStream.Read(buffer, 0, (int)fileStream.Length);
+
+            return Convert.ToBase64String(buffer);
         }
 
         /// <summary>

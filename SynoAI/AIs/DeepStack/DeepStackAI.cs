@@ -14,7 +14,7 @@ namespace SynoAI.AIs.DeepStack
 {
     public class DeepStackAI : AI
     {
-        private const string URL_VISION_DETECTION = "v1/vision/detection";
+        private const string URL_VISION_DETECTION = "v1/vision/custom/ipcam-general";
 
         public async override Task<IEnumerable<AIPrediction>> Process(ILogger logger, Camera camera, byte[] image)
         {
